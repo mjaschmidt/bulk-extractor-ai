@@ -1,6 +1,6 @@
 # Bulk Extractor AI
 
-An intelligent file extraction application that leverages Large Language Models (LLMs) to parse a batch of files and return structured data based on natural language prompts.
+An AI tool that uses Large Language Models (LLMs) to automate the process of extracting valuable information from large sets of files, such as emails or documents, into a structured format like JSON.
 
 ---
 
@@ -8,7 +8,9 @@ An intelligent file extraction application that leverages Large Language Models 
 
 This tool automates the tedious process of extracting specific information from a large number of similar files (e.g., emails, documents). You provide a folder of files, tell the AI what you're looking for in plain English, and it generates structured JSON output for you.
 
-**Current Status:** This project is currently a fully functional Command-Line Interface (CLI) tool.
+**Example Use Case**
+
+You want to analyze your grocery habits over the last three years but your data is buried in hundreds of order confirmation emails scattered throughout your inbox, manually copying and pasting would take hours. Instead, you can download your inbox or just the subset containing grocery receipts, point Bulk Extractor AI to the folder of .eml files, and provide a simple prompt: “For each email, extract the grocery items I have purchased, including their name, quantity, and price.” The tool then processes each email, filters out irrelevant ones, and generates clean JSON file(s) containing the data you requested.
 
 ### Getting Started
 

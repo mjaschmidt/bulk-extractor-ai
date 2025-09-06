@@ -1,0 +1,9 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+.archived
+.copyTree.py
+.copyFiles.py
+input_data
+output_data

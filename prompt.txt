@@ -6,5 +6,5 @@ Analyze the provided email content and extract the following:
 
 Return the data as a single JSON object with two keys: "groceries" and "delivery_address".
 
-If you cannot find any relevant information in the email, return `null`.
+The text will not always be relevant; if you cannot find any relevant information in the email, do *NOT* return any JSON, instead return `null`.
 Do not include any explanations or introductory text in your response. Only output the raw JSON or null.

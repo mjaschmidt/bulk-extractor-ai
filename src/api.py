@@ -10,6 +10,7 @@ import io
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 # --- Import our existing modules ---
 from .file_processing import extract_email_body
@@ -22,10 +23,64 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# --- NEW: Pydantic Models for our new endpoint ---
+# This model defines the structure of the request body for /generate-prompt/
+class PromptGenerationRequest(BaseModel):
+    user_goal: str
+    api_key: str
+
+# This model defines the structure of the response for /generate-prompt/
+class PromptGenerationResponse(BaseModel):
+    generated_prompt: str
+
 @app.get("/")
 def read_root():
     """A simple endpoint to confirm the API is running."""
     return {"status": "Bulk Extractor AI is running"}
+
+# --- NEW: The Orchestrator Endpoint ---
+@app.post("/generate-prompt/", response_model=PromptGenerationResponse)
+async def generate_extraction_prompt(request: PromptGenerationRequest):
+    """
+    Takes a user's simple goal and generates a detailed extraction prompt.
+    """
+    try:
+        # Load the meta-prompt template from the file.
+        with open("meta_prompt.txt", "r", encoding="utf-8") as f:
+            meta_prompt_template = f.read()
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Meta-prompt file not found on server."
+        )
+
+    # Inject the user's goal into the template.
+    full_orchestrator_prompt = meta_prompt_template.replace("{{USER_GOAL}}", request.user_goal)
+
+    # Initialize the Gemini client using the user's provided key.
+    try:
+        os.environ["GEMINI_API_KEYS"] = request.api_key
+        os.environ["GEMINI_MODELS"] = "gemini-2.5-pro,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite,gemini-1.5-flash,gemini-1.5-flash-8b"
+        gemini_client = GeminiClient()
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    finally:
+        # Clean up environment variables immediately after use.
+        os.environ.pop("GEMINI_API_KEYS", None)
+        os.environ.pop("GEMINI_MODELS", None)
+
+    # Make the call to the LLM to generate the detailed prompt.
+    generated_prompt = gemini_client.generate_content(full_orchestrator_prompt)
+
+    if not generated_prompt:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service failed to generate a prompt."
+        )
+
+    # Return the generated prompt in the structured response.
+    return PromptGenerationResponse(generated_prompt=generated_prompt)
+
 
 # This is the core function that was previously in cli.py. We've adapted it
 # to work within the API context, taking data as arguments instead of file paths.

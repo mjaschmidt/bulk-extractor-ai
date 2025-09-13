@@ -2,7 +2,7 @@
 
 An AI-powered, full-stack application that transforms unstructured files into structured JSON data using natural language. This project features an intuitive Streamlit web interface, a powerful FastAPI backend, and a robust command-line tool for developers.
 
-**Live Demo:** to be added
+**Live Demo:** [bulkai.streamlit.app](https://bulkai.streamlit.app/)
 
 ---
 
@@ -26,7 +26,7 @@ This project is designed for both end-users and developers, offering multiple wa
 
 The easiest way to use the tool is through the live web application. It provides a user-friendly interface for uploading files, entering your API key, and describing your goal.
 
-1.  Navigate to the [Live Demo URL](https://to-be-added.streamlit.app/).
+1.  Navigate to [bulkai.streamlit.app](https://bulkai.streamlit.app/).
 2.  Enter your Gemini API Key in the sidebar. (For a free key, visit [Google AI Studio](https://aistudio.google.com/apikey). You can add multiple keys for automatic rotation by separating them with commas.)
 3.  Select your desired output method.
 4.  Upload one or more `.eml` files.

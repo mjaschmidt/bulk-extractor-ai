@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import zipfile
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 import json
 import io
 
@@ -23,64 +23,49 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# --- NEW: Pydantic Models for our new endpoint ---
-# This model defines the structure of the request body for /generate-prompt/
+# --- Pydantic Models for the (now internal) orchestrator ---
 class PromptGenerationRequest(BaseModel):
     user_goal: str
     api_key: str
 
-# This model defines the structure of the response for /generate-prompt/
 class PromptGenerationResponse(BaseModel):
     generated_prompt: str
+    
+# --- Helper function for prompt generation ---
+def _generate_prompt_from_goal(user_goal: str, api_key: str) -> str:
+    """Takes a user's goal and generates a detailed extraction prompt."""
+    try:
+        with open("meta_prompt.txt", "r", encoding="utf-8") as f:
+            meta_prompt_template = f.read()
+    except FileNotFoundError:
+        # This is a server-side error, so we raise an exception that the main endpoint will catch.
+        raise RuntimeError("Meta-prompt file not found on server.")
+
+    full_orchestrator_prompt = meta_prompt_template.replace("{{USER_GOAL}}", user_goal)
+
+    try:
+        os.environ["GEMINI_API_KEYS"] = api_key
+        os.environ["GEMINI_MODELS"] = "gemini-2.5-pro,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite,gemini-1.5-flash,gemini-1.5-flash-8b"
+        gemini_client = GeminiClient()
+    except ValueError as e:
+        # This is a user error (bad key), so we raise an exception that leads to a 400 error.
+        raise ValueError(str(e))
+    finally:
+        os.environ.pop("GEMINI_API_KEYS", None)
+        os.environ.pop("GEMINI_MODELS", None)
+
+    generated_prompt = gemini_client.generate_content(full_orchestrator_prompt)
+
+    if not generated_prompt:
+        # This is a service availability issue.
+        raise ConnectionError("AI service failed to generate a prompt.")
+    
+    return generated_prompt.strip()
 
 @app.get("/")
 def read_root():
     """A simple endpoint to confirm the API is running."""
     return {"status": "Bulk Extractor AI is running"}
-
-# --- NEW: The Orchestrator Endpoint ---
-@app.post("/generate-prompt/", response_model=PromptGenerationResponse)
-async def generate_extraction_prompt(request: PromptGenerationRequest):
-    """
-    Takes a user's simple goal and generates a detailed extraction prompt.
-    """
-    try:
-        # Load the meta-prompt template from the file.
-        with open("meta_prompt.txt", "r", encoding="utf-8") as f:
-            meta_prompt_template = f.read()
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Meta-prompt file not found on server."
-        )
-
-    # Inject the user's goal into the template.
-    full_orchestrator_prompt = meta_prompt_template.replace("{{USER_GOAL}}", request.user_goal)
-
-    # Initialize the Gemini client using the user's provided key.
-    try:
-        os.environ["GEMINI_API_KEYS"] = request.api_key
-        os.environ["GEMINI_MODELS"] = "gemini-2.5-pro,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite,gemini-1.5-flash,gemini-1.5-flash-8b"
-        gemini_client = GeminiClient()
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    finally:
-        # Clean up environment variables immediately after use.
-        os.environ.pop("GEMINI_API_KEYS", None)
-        os.environ.pop("GEMINI_MODELS", None)
-
-    # Make the call to the LLM to generate the detailed prompt.
-    generated_prompt = gemini_client.generate_content(full_orchestrator_prompt)
-
-    if not generated_prompt:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI service failed to generate a prompt."
-        )
-
-    # Return the generated prompt in the structured response.
-    return PromptGenerationResponse(generated_prompt=generated_prompt)
-
 
 # This is the core function that was previously in cli.py. We've adapted it
 # to work within the API context, taking data as arguments instead of file paths.
@@ -131,24 +116,50 @@ def process_and_save_json(data_str: str, output_path: str, source_filename: str)
         print(f"An unexpected error occurred while saving JSON for {source_filename}: {e}")
         return False
 
+
 @app.post("/extract/")
 async def create_extraction_task(
     # --- Endpoint Parameters ---
     # 1. The user's API key. We use Form(...) to get it from the form data.
     api_key: str = Form(...),
-    # 2. The user's prompt.
-    prompt: str = Form(...),
-    # 3. The output method.
+    # 2. The output method.
     output_method: str = Form("one_per_relevant_file"),
-    # 4. The list of files to process.
-    files: List[UploadFile] = File(...)
+    # 3. The list of files to process.
+    files: List[UploadFile] = File(...),
+    # 4. The user's prompt or goal
+    prompt: Optional[str] = Form(None),
+    user_goal: Optional[str] = Form(None)
 ):
     """
     Handles the file extraction task:
-    1. Receives files, API key, and prompt from the user.
-    2. Processes each file using the core logic.
-    3. Zips the results and returns them for download.
+    1. Receives files, API key, and prompt or goal from the user.
+    2. If a goal is provided instead of a prompt, generates the prompt.
+    3. Processes each file using the core logic.
+    4. Zips the results and returns them for download.
     """
+    # --- NEW: Input Validation ---
+    if not prompt and not user_goal:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You must provide either a 'prompt' or a 'user_goal'.")
+    if prompt and user_goal:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot provide both a 'prompt' and a 'user_goal'.")
+    
+    final_prompt = ""
+    # --- NEW: Conditional Prompt Generation ---
+    if user_goal:
+        print("User goal provided. Generating detailed prompt...")
+        try:
+            final_prompt = _generate_prompt_from_goal(user_goal, api_key)
+            print(f"Generated Prompt: {final_prompt}")
+        except ValueError as e: # Catches bad API key
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        except ConnectionError as e: # Catches AI service failure
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+        except RuntimeError as e: # Catches missing meta-prompt file
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    else:
+        # If no user_goal, then the prompt must have been provided.
+        final_prompt = prompt
+    
     # --- Temporary Directory Management ---
     # We create a secure, temporary directory to store this specific request's
     # files. This prevents conflicts between simultaneous user requests.
@@ -195,8 +206,8 @@ async def create_extraction_task(
                     print(f"Could not extract content from {filename}. Skipping.")
                     continue
 
-                full_prompt = f"{prompt}\n\nHere is the email content:\n\n---\n{clean_text}\n---"
-                api_response = gemini_client.generate_content(full_prompt)
+                full_extraction_prompt = f"{final_prompt}\n\nHere is the email content:\n\n---\n{clean_text}\n---"
+                api_response = gemini_client.generate_content(full_extraction_prompt)
 
                 if not api_response:
                     print(f"No response from API for {filename}. Skipping.")

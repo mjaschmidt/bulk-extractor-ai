@@ -50,32 +50,61 @@ def save_individual_json(data_str: str, output_path: str, source_filename: str) 
 def main():
     """The main function to run the CLI application."""
     parser = argparse.ArgumentParser(description="Intelligent File Extractor using Gemini AI.")
-    # ... (The argparse section remains exactly the same) ...
     parser.add_argument("--input-folder", type=str, required=True, help="Path to the folder containing .eml files.")
     parser.add_argument("--output-folder", type=str, required=True, help="Path to the folder where output .json files will be saved.")
-    parser.add_argument("--prompt-file", type=str, required=True, help="Path to a .txt file with the extraction prompt.")
     parser.add_argument("--output-method", type=str, choices=["one_per_file", "single_file", "one_per_relevant_file"], default="one_per_file", help="Defines how output files are generated.")
+    
+    # --- NEW: Mutually Exclusive Group for Prompt Input ---
+    # This ensures the user provides one and only one of these options.
+    prompt_group = parser.add_mutually_exclusive_group(required=True)
+    prompt_group.add_argument("--prompt-file", type=str, help="Path to a .txt file with the detailed extraction prompt.")
+    prompt_group.add_argument("--user-goal", type=str, help="A simple, natural language description of the extraction goal.")
+    
     args = parser.parse_args()
 
     project_root = pathlib.Path(__file__).parent.parent
     from dotenv import load_dotenv
     load_dotenv(project_root / ".env")
-
-    try:
-        with open(args.prompt_file, 'r', encoding='utf-8') as f:
-            base_prompt = f.read()
-    except FileNotFoundError:
-        print(f"Error: Prompt file not found at {args.prompt_file}")
-        return
-
-    print("--- Starting Extraction Process ---")
     
+    final_prompt = ""
+    
+    print("--- Initializing LLM Service ---")
     try:
         gemini_client = GeminiClient()
     except ValueError as e:
         print(f"Configuration Error: {e}")
         return
 
+    # --- NEW: Conditional Prompt Loading/Generation for CLI ---
+    if args.user_goal:
+        print("User goal provided. Generating detailed prompt...")
+        try:
+            with open("meta_prompt.txt", "r", encoding="utf-8") as f:
+                meta_prompt_template = f.read()
+            
+            full_orchestrator_prompt = meta_prompt_template.replace("{{USER_GOAL}}", args.user_goal)
+            final_prompt = gemini_client.generate_content(full_orchestrator_prompt)
+
+            if not final_prompt:
+                print("Error: AI service failed to generate a prompt from the user goal.")
+                return
+            
+            print(f"--- Generated Prompt ---\n{final_prompt}\n------------------------")
+
+        except FileNotFoundError:
+            print("Error: meta_prompt.txt not found in the root directory.")
+            return
+    else:
+        # If no user_goal, then prompt_file must have been provided.
+        try:
+            with open(args.prompt_file, 'r', encoding='utf-8') as f:
+                final_prompt = f.read()
+        except FileNotFoundError:
+            print(f"Error: Prompt file not found at {args.prompt_file}")
+            return
+
+    print("\n--- Starting Extraction Process ---")
+    
     all_results_for_single_file = []
     try:
         files_to_process = os.listdir(args.input_folder)
@@ -93,8 +122,9 @@ def main():
                 print(f"Could not extract content from {filename}. Skipping.")
                 continue
 
-            full_prompt = f"{base_prompt}\n\nHere is the email content:\n\n---\n{clean_text}\n---"
-            api_response = gemini_client.generate_content(full_prompt)
+             # Use the determined final_prompt here
+            full_extraction_prompt = f"{final_prompt}\n\nHere is the email content:\n\n---\n{clean_text}\n---"
+            api_response = gemini_client.generate_content(full_extraction_prompt)
 
             if not api_response:
                 print(f"No response from API for {filename} after all retries. Skipping.")

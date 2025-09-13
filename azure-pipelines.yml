@@ -1,0 +1,53 @@
+# azure-pipelines.yml
+
+# --- Trigger ---
+# This section defines what causes the pipeline to run.
+# We're telling it to trigger on any push to the 'main' branch.
+trigger:
+- main
+
+# --- Agent Pool ---
+# This specifies what kind of virtual machine the pipeline will run on.
+# 'ubuntu-latest' is a standard, reliable choice provided by Microsoft.
+pool:
+  vmImage: 'ubuntu-latest'
+
+# --- Pipeline Steps ---
+# This is the list of tasks our robot will perform, in order.
+steps:
+
+# Step 1: Docker Build Task
+# This task builds our Docker image from the Dockerfile.
+- task: Docker@2
+  displayName: 'Build Docker Image'
+  inputs:
+    # The name of the service connection we created in Azure DevOps.
+    containerRegistry: 'DockerHubConnection' 
+    # The name of the repository on Docker Hub where the image will be stored.
+    # The format is typically your_username/your_image_name.
+    repository: 'emptycyan/bulk-extractor-ai'
+    # The command to run, in this case, 'build'.
+    command: 'build'
+    # The path to the Dockerfile in our repository.
+    Dockerfile: '**/Dockerfile'
+    # Tags to apply to the image. $(Build.BuildId) is a predefined Azure variable
+    # that gives each build a unique number, which is great for versioning.
+    tags: |
+      $(Build.BuildId)
+      latest
+
+# Step 2: Docker Push Task
+# This task pushes the image we just built to the container registry (Docker Hub).
+- task: Docker@2
+  displayName: 'Push Docker Image to Docker Hub'
+  inputs:
+    # Same service connection as before.
+    containerRegistry: 'DockerHubConnection'
+    # Same repository name.
+    repository: 'emptycyan/bulk-extractor-ai'
+    # The command is now 'push'.
+    command: 'push'
+    # We push the same tags we used during the build.
+    tags: |
+      $(Build.BuildId)
+      latest

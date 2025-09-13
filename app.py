@@ -11,7 +11,8 @@ st.set_page_config(
 )
 
 # --- Backend API URL ---
-API_URL = "http://localhost:8000/extract"  # Update this if your FastAPI server is hosted elsewhere
+# API_URL = "http://localhost:8000/extract"  # Development (local FastAPI server)
+API_URL = "https://bulk-extractor-ai-backend.onrender.com/extract/" 
 
 # --- UI Components ---
 
